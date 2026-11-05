@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DuoGacha Simulator</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --gold: #fad15a;
+      --open-progress: 0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      overflow: hidden;
+      background: #090604;
+      color: rgba(255, 255, 255, 0.92);
+      font-family: "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+    #duo-screen {
+      position: relative;
+      flex: 1;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      perspective: 900px;
+      background: radial-gradient(circle at center, rgba(250, 209, 90, var(--glow, 0.2)), #090604 70%);
+    }
+    .half {
+      position: relative;
+      width: 100%;
+      height: 50%;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    /* TOP HALF: Side 1 of iPhone Duo (Chest Lid) */
+    #top-lid {
+      background: linear-gradient(180deg, #5c3314 0%, #3d200a 100%);
+      border-bottom: 8px solid #d9a633;
+      transform-origin: top center;
+      transition: transform 0.08s linear;
+      z-index: 3;
+    }
+    /* BOTTOM HALF: Side 2 of iPhone Duo (Chest Base + Interior) */
+    #bottom-base {
+      background: linear-gradient(180deg, #2b1506 0%, #47250c 100%);
+      border-top: 6px solid #b88723;
+      z-index: 1;
+    }
+    .chest-art {
+      position: absolute;
+      width: 100%;
+      height: 160%;
+      object-fit: cover;
+      opacity: 0.75;
+      pointer-events: none;
+    }
+    #top-lid .chest-art { top: 0; }
+    #bottom-base .chest-art { bottom: 0; }
+
+    /* Center hinge crease line */
+    #hinge-seam {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: rgba(0, 0, 0, 0.85);
+      box-shadow: 0 0 18px rgba(250, 209, 90, var(--glow, 0.25));
+      z-index: 2;
+      pointer-events: none;
+    }
+    /* Loot inside the chest */
+    #loot {
+      position: relative;
+      z-index: 4;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      transform: scale(0.3);
+      opacity: 0;
+      transition: transform 0.35s cubic-bezier(0.2, 1.3, 0.4, 1), opacity 0.25s ease;
+    }
+    #loot.visible {
+      transform: scale(1);
+      opacity: 1;
+    }
+    #loot img {
+      width: 130px;
+      height: 130px;
+      object-fit: contain;
+      filter: drop-shadow(0 0 24px rgba(250, 209, 90, 0.9));
+    }
+    #loot p {
+      margin: 0;
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--gold);
+      text-shadow: 0 2px 8px rgba(0,0,0,0.9);
+    }
+    /* Controls overlay at bottom */
+    #controls {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(420px, 90vw);
+      background: rgba(15, 15, 18, 0.85);
+      backdrop-filter: blur(8px);
+      padding: 12px 18px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.82rem;
+      color: rgba(255, 255, 255, 0.7);
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--gold);
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="duo-screen">
+    <!-- Top Screen of iPhone Duo: Chest Lid -->
+    <div id="top-lid" class="half">
+      <img id="lid-art" class="chest-art" alt="Chest Lid" src="DuoGacha/Assets.xcassets/chest_closed.imageset/chest_closed.png">
+    </div>
+
+    <div id="hinge-seam"></div>
+
+    <!-- Bottom Screen of iPhone Duo: Chest Base & Loot Inside -->
+    <div id="bottom-base" class="half">
+      <img id="base-art" class="chest-art" alt="Chest Base" src="DuoGacha/Assets.xcassets/chest_closed.imageset/chest_closed.png">
+      <div id="loot" aria-live="polite">
+        <img id="loot-image" alt="">
+        <p id="loot-name"></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="row">
+      <span>iPhone Duo Hinge</span>
+      <span id="angle">0°</span>
+    </div>
+    <input id="hinge" type="range" min="0" max="180" value="0" step="1">
+  </div>
+
+  <audio id="creak" src="DuoGacha/chest_creak.wav" preload="auto"></audio>
+  <audio id="suspense" src="DuoGacha/chest_suspense.wav" preload="auto" loop></audio>
+
+  <script>
+    const lootTable = ["gold_coin", "rubber_duck", "old_boot"];
+    const openDegrees = 150;
+    const closeDegrees = 10;
+    const art = {
+      closed: "DuoGacha/Assets.xcassets/chest_closed.imageset/chest_closed.png",
+      opening: "DuoGacha/Assets.xcassets/chest_opening.imageset/chest_opening.png",
+      open: "DuoGacha/Assets.xcassets/chest_open.imageset/chest_open.png"
+    };
+
+    const hinge = document.querySelector("#hinge");
+    const angle = document.querySelector("#angle");
+    const topLid = document.querySelector("#top-lid");
+    const lidArt = document.querySelector("#lid-art");
+    const baseArt = document.querySelector("#base-art");
+    const loot = document.querySelector("#loot");
+    const lootImage = document.querySelector("#loot-image");
+    const lootName = document.querySelector("#loot-name");
+    const creak = document.querySelector("#creak");
+    const suspense = document.querySelector("#suspense");
+
+    let chestState = "closed";
+    let hasAwardedLoot = false;
+
+    function title(id) {
+      return id.split("_").map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(" ");
+    }
+
+    function showChest(state, degrees) {
+      const progress = Math.min(Math.max(degrees / openDegrees, 0), 1);
+      // Lift and tilt the top half (lid) away from the bottom half
+      topLid.style.transform = `translateY(${-progress * 55}%) rotateX(${progress * 65}deg)`;
+      document.body.style.setProperty("--glow", state === "open" ? "0.85" : String(0.2 + progress * 0.5));
+
+      if (chestState === state) return;
+      chestState = state;
+      lidArt.src = art[state];
+      baseArt.src = art[state];
+    }
+
+    function showLoot(id) {
+      if (!id) {
+        loot.classList.remove("visible");
+        lootName.textContent = "";
+        lootImage.removeAttribute("src");
+        return;
+      }
+      lootImage.src = `DuoGacha/Assets.xcassets/${id}.imageset/${id}.png`;
+      lootName.textContent = title(id);
+      loot.classList.add("visible");
+    }
+
+    function updateSuspense(degrees, isOpen) {
+      if (isOpen) {
+        suspense.pause();
+        return;
+      }
+      const progress = Math.min(Math.max(degrees / openDegrees, 0), 1);
+      suspense.volume = 0.25 + progress * 0.75;
+      suspense.playbackRate = 1.0 + progress * 0.28;
+      if (suspense.paused && degrees > 0) {
+        suspense.play().catch(() => {});
+      }
+    }
+
+    function playOpen() {
+      suspense.pause();
+      creak.currentTime = 0;
+      creak.play().catch(() => {});
+      if (navigator.vibrate) navigator.vibrate(40);
+    }
+
+    function applyHinge(degrees) {
+      angle.textContent = `${Math.round(degrees)}°`;
+
+      if (hasAwardedLoot) {
+        if (degrees < closeDegrees) {
+          hasAwardedLoot = false;
+          showChest("closed", degrees);
+          showLoot(null);
+          updateSuspense(degrees, false);
+        } else if (degrees >= openDegrees) {
+          showChest("open", degrees);
+        } else {
+          showChest("opening", degrees);
+        }
+        return;
+      }
+
+      if (degrees >= openDegrees) {
+        hasAwardedLoot = true;
+        showChest("open", degrees);
+        showLoot(lootTable[Math.floor(Math.random() * lootTable.length)]);
+        playOpen();
+      } else if (degrees >= closeDegrees) {
+        showChest("opening", degrees);
+        updateSuspense(degrees, false);
+      } else {
+        showChest("closed", degrees);
+        showLoot(null);
+        updateSuspense(degrees, false);
+      }
+    }
+
+    hinge.addEventListener("input", () => applyHinge(Number(hinge.value)));
+    applyHinge(0);
+  </script>
+</body>
+</html>
